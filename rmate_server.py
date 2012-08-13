@@ -3,6 +3,7 @@ import asynchat
 import socket
 import threading
 
+
 # Ugly hack to communicate with the asyncore thread
 class RunOnThread(asyncore.dispatcher):
     def __init__(self, block, map):
@@ -14,6 +15,7 @@ class RunOnThread(asyncore.dispatcher):
     def handle_connect(self):
         self.block()
         self.close()
+
 
 class RMateServer(asyncore.dispatcher):
     def __init__(self, sublime_plugin, connection_details = ('localhost', 52698)):
@@ -30,6 +32,9 @@ class RMateServer(asyncore.dispatcher):
         server_thread.daemon = True
         server_thread.start()
 
+    def running(self):
+        return True
+
     def close_all(self):
         for channel in self.run_map.values():
             channel.close()
@@ -37,8 +42,24 @@ class RMateServer(asyncore.dispatcher):
     def run_on_thread(self, block):
         RunOnThread(lambda: block(self), self.run_map)
 
-    def close_handler(self, handler_id):
-        self.run_map[handler_id].close()
+    # These two methods are really implementation bound
+    def get_handler_by_id(self, handler_id):
+        return self.run_map[handler_id]
+
+    def get_handler_id(self, handler):
+        return handler.handler_id()
+
+    def close_file(self, handler_id, token):
+        handler = self.get_handler_by_id(handler_id)
+        if handler == None:
+            return
+        handler.close_file(token)
+
+    def update_file(self, handler_id, token, contents):
+        handler = self.get_handler_by_id(handler_id)
+        if handler == None:
+            return
+        handler.write_file(token, contents)
 
     def handle_accept(self):
         pair = self.accept()
@@ -97,7 +118,7 @@ class WaitingForDot:
         self.handler.set_terminator("\n")
 
     def data_received(self, data):
-        self.handler.sublime_plugin.open_file(self.headers["token"], self.data)
+        self.handler.open_file(self.headers["token"], self.data)
         return WaitingForCommand(self.handler)
 
 
@@ -107,9 +128,14 @@ class RMateHandler(asynchat.async_chat):
         self.received_data = ""
         self.state = WaitingForCommand(self)
         self.sublime_plugin = sublime_plugin
+        self.open_files = []
 
     def say_hello(self):
         self.push(socket.gethostname() + "\n")
+
+    def open_file(self, token, contents):
+        self.open_files.append(token)
+        self.sublime_plugin.open_file(token, contents, self.handler_id())
 
     def collect_incoming_data(self, data):
         self.received_data += data
@@ -125,6 +151,18 @@ class RMateHandler(asynchat.async_chat):
 token: {token}
 data: {length}
 {file_contents}
-.
 """.format(token=token, length=len(file_contents), file_contents=file_contents)
         self.push(command)
+
+    def close_file(self, token):
+        command = """close
+token: {token}
+
+""".format(token=token)
+        self.push(command)
+        self.open_files.remove(token)
+        if not self.open_files:
+            self.close()
+
+    def handler_id(self):
+        return self.socket.fileno()
