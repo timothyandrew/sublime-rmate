@@ -19,9 +19,6 @@ class Settings
     @host = ENV['RMATE_HOST'].to_s if ENV.has_key? 'RMATE_HOST'
     @port = ENV['RMATE_PORT'].to_i if ENV.has_key? 'RMATE_PORT'
 
-    if @host == 'auto' and (conn = ENV['SSH_CONNECTION'])
-      @host = conn.split(' ').first
-    end
 
     @wait    = false
     @force   = false
@@ -29,6 +26,10 @@ class Settings
 
     read_disk_settings
     parse_cli_options
+    
+    if @host == 'auto' and (conn = ENV['SSH_CONNECTION'])
+      @host = conn.split(' ').first
+    end
   end
 
   def read_disk_settings
